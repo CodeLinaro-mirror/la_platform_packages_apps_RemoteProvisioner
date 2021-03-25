@@ -16,8 +16,11 @@
 
 package com.android.remoteprovisioner;
 
+import android.os.Build;
+import android.os.Build.VERSION;
 import android.util.Log;
 
+import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
@@ -25,6 +28,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
+import co.nstant.in.cbor.model.Map;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -143,6 +147,72 @@ public class CborUtils {
                                     ((ByteString) dataItems.get(CHALLENGE_INDEX)).getBytes());
         } catch (CborException e) {
             Log.e(TAG, "CBOR parsing/serializing failed.", e);
+            return null;
+        }
+    }
+
+    /**
+     * Gathers information from system properties to populate and serialize a CBOR Map to be
+     * sent to the server.
+     */
+    public static Map getDeviceInfo() {
+        return (Map) (new CborBuilder()
+                .addMap()
+                    .put("brand", Build.BRAND)
+                    .put("manufacturer", Build.MANUFACTURER)
+                    .put("product", Build.PRODUCT)
+                    .put("model", Build.MODEL)
+                    .put("board", Build.BOARD)
+                    .put("vb_state", System.getProperty("ro.boot.verifiedbootstate"))
+                    .put("bootloader_state", System.getProperty("ro.boot.vbmeta.device_state"))
+                    .put("os_version", Build.VERSION.BASE_OS)
+                    .put("system_patch_level",
+                            Integer.parseInt(Build.VERSION.SECURITY_PATCH.replace("-", "")))
+                    .put("boot_patch_level", Integer.parseInt("0"))
+                    .put("vendor_patch_level",
+                            Integer.parseInt(
+                                    System.getProperty("ro.vendor.build.security_patch", "0")
+                                            .replace("-", "")))
+                    .end()
+                .build().get(0));
+    }
+
+    /**
+     * Takes the various fields fetched from the server and the remote provisioning service and
+     * formats them in the CBOR blob the server is expecting as defined by the
+     * IRemotelyProvisionedComponent HAL AIDL files.
+     */
+    public static byte[] buildCertificateRequest(Map deviceInfo, byte[] challenge,
+                                                 byte[] protectedData, byte[] macedKeysToSign) {
+        try {
+            ByteArrayInputStream bais = new ByteArrayInputStream(protectedData);
+            List<DataItem> dataItems = new CborDecoder(bais).decode();
+            if (dataItems.size() != 1 || dataItems.get(0).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "protectedData is carrying unexpected data.");
+                return null;
+            }
+            Array protectedDataArray = (Array) dataItems.get(0);
+
+            bais = new ByteArrayInputStream(macedKeysToSign);
+            dataItems = new CborDecoder(bais).decode();
+            if (dataItems.size() != 1 || dataItems.get(0).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "macedKeysToSign is carrying unexpected data.");
+                return null;
+            }
+            Array macedKeysToSignArray = (Array) dataItems.get(0);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            new CborEncoder(baos).encode(new CborBuilder()
+                    .addArray()
+                        .add(deviceInfo)
+                        .add(challenge)
+                        .add(protectedDataArray)
+                        .add(macedKeysToSignArray)
+                        .end()
+                    .build());
+            return baos.toByteArray();
+        } catch (CborException e) {
+            Log.e(TAG, "Malformed CBOR", e);
             return null;
         }
     }
