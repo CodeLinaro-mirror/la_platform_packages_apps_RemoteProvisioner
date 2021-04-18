@@ -18,6 +18,13 @@ package com.android.remoteprovisioner;
 
 import android.util.Log;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
@@ -25,12 +32,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import co.nstant.in.cbor.model.Map;
 
 public class CborUtils {
     private static final int RESPONSE_CERT_ARRAY_INDEX = 0;
@@ -143,6 +145,62 @@ public class CborUtils {
                                     ((ByteString) dataItems.get(CHALLENGE_INDEX)).getBytes());
         } catch (CborException e) {
             Log.e(TAG, "CBOR parsing/serializing failed.", e);
+            return null;
+        }
+    }
+
+    /**
+     * Takes the various fields fetched from the server and the remote provisioning service and
+     * formats them in the CBOR blob the server is expecting as defined by the
+     * IRemotelyProvisionedComponent HAL AIDL files.
+     */
+    public static byte[] buildCertificateRequest(byte[] deviceInfo, byte[] challenge,
+                                                 byte[] protectedData, byte[] macedKeysToSign) {
+            // This CBOR library doesn't support adding already serialized CBOR structures into a
+            // CBOR builder. Because of this, we have to first deserialize the provided parameters
+            // back into the library's CBOR object types, and then reserialize them into the
+            // desired structure.
+        try {
+            // Deserialize the protectedData blob
+            ByteArrayInputStream bais = new ByteArrayInputStream(protectedData);
+            List<DataItem> dataItems = new CborDecoder(bais).decode();
+            if (dataItems.size() != 1 || dataItems.get(0).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "protectedData is carrying unexpected data.");
+                return null;
+            }
+            Array protectedDataArray = (Array) dataItems.get(0);
+
+            // Deserialize macedKeysToSign
+            bais = new ByteArrayInputStream(macedKeysToSign);
+            dataItems = new CborDecoder(bais).decode();
+            if (dataItems.size() != 1 || dataItems.get(0).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "macedKeysToSign is carrying unexpected data.");
+                return null;
+            }
+            Array macedKeysToSignArray = (Array) dataItems.get(0);
+
+            // Deserialize deviceInfo
+            bais = new ByteArrayInputStream(deviceInfo);
+            dataItems = new CborDecoder(bais).decode();
+            if (dataItems.size() != 1 || dataItems.get(0).getMajorType() != MajorType.MAP) {
+                Log.e(TAG, "macedKeysToSign is carrying unexpected data.");
+                return null;
+            }
+            Map deviceInfoMap = (Map) dataItems.get(0);
+
+            // Serialize the actual CertificateSigningRequest structure
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            new CborEncoder(baos).encode(new CborBuilder()
+                    .addArray()
+                        .add(deviceInfoMap)
+                        .add(challenge)
+                        .add(protectedDataArray)
+                        .add(macedKeysToSignArray)
+                        .end()
+                    .build());
+            return baos.toByteArray();
+        } catch (CborException e) {
+            Log.e(TAG, "Malformed CBOR", e);
             return null;
         }
     }
