@@ -16,7 +16,6 @@
 
 package com.android.remoteprovisioner;
 
-import android.util.Base64;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
@@ -36,10 +35,10 @@ public class ServerInterface {
     private static final int TIMEOUT_MS = 5000;
 
     private static final String TAG = "ServerInterface";
-    private static final String PROVISIONING_URL = "https://remoteprovisioning.googleapis.com";
-    private static final String GEEK_URL = PROVISIONING_URL + "/v1alpha1:fetchEekChain";
+    private static final String PROVISIONING_URL = "";
+    private static final String GEEK_URL = PROVISIONING_URL + "/v1/eekchain";
     private static final String CERTIFICATE_SIGNING_URL =
-            PROVISIONING_URL + "/v1alpha1:signCertificates?challenge=";
+            PROVISIONING_URL + "/v1:signCertificates?challenge=";
 
     /**
      * Ferries the CBOR blobs returned by KeyMint to the provisioning server. The data sent to the
@@ -58,8 +57,7 @@ public class ServerInterface {
      */
     public static List<byte[]> requestSignedCertificates(byte[] csr, byte[] challenge) {
         try {
-            URL url = new URL(CERTIFICATE_SIGNING_URL
-                        + Base64.encodeToString(challenge, Base64.URL_SAFE));
+            URL url = new URL(CERTIFICATE_SIGNING_URL + new String(challenge, "UTF-8"));
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
             con.setRequestMethod("POST");
             con.setDoOutput(true);
